@@ -311,6 +311,29 @@ local sections = {
 
     return index
   end,
+  [9] = function(stream) -- Table Elements Section
+    local count
+    count, stream = parsers.parseLEBu(stream, 4)
+
+    local tables = {}
+    for i = 1, count do
+      local tableIndex
+      tableIndex, stream = parsers.parseLEBu(stream, 4)
+
+      local offset
+      offset, stream = parseInitializerExpr(stream)
+
+      local elCount
+      elCount, stream = parsers.parseLEBu(stream, 4)
+
+      tables[tableIndex] = tables[tableIndex] or {}
+      for j = 1, elCount do
+        tables[tableIndex][offset + j - 1], stream = parsers.parseLEBu(stream, 4)
+      end
+    end
+
+    return tables
+  end,
   [10] = function(stream) -- Function Bodies
     local count
     count, stream = parsers.parseLEBu(stream, 4)

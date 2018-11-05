@@ -28,6 +28,8 @@ function loader.load(wasm)
       end
     elseif v.kind == kinds.Memory then
       exports[k] = instance:indexMemory(v.index)
+    elseif v.kind == kinds.Table then
+      exports[k] = instance.tables[v.index]
     else
       error("Unsupported export: '" .. v.kind .. "'", 0)
     end

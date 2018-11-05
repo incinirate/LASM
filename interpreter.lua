@@ -15,6 +15,7 @@ function intepreter.newInstance(sectionData)
   
   t.importTable = {}
 
+  t.tables = {}
   t.globals = {}
   t.memories = {}
   t.functions = {}
@@ -50,6 +51,13 @@ function intepreter.newInstance(sectionData)
     end
   end
 
+  if sectionData[9] then
+    -- Setup tables
+    for k, v in pairs(sectionData[9]) do
+      t.tables[k] = v
+    end
+  end
+
   if sectionData[11] then
     for i = 1, #sectionData[11] do
       local segment = sectionData[11][i]
@@ -72,7 +80,9 @@ end
 
 function intepreter:link(module, field, value)
   local meta = self.importTable[module .. "::" .. field]
-  meta[1][meta[2]] = value
+  if meta then
+    meta[1][meta[2]] = value
+  end
 end
 
 local function printStack(stack, prefix)
@@ -176,6 +186,17 @@ local function skipBlock(iPtr, instrSet, brkOnElse)
   return iPtr
 end
 
+local function num(val)
+  local t = type(val) 
+  if t == "number" then
+    return t
+  elseif t == "boolean" then
+    return t == true and 1 or 0
+  else
+    return tonumber(t)
+  end
+end
+
 instructions = {
 -- INT32
   I32Const = function(stack, instr)
@@ -203,8 +224,8 @@ instructions = {
     stack[#stack + 1] = math.floor(math.abs(a / b))
   end,
   I32And = function(stack)
-    local b = pop(stack)
-    local a = pop(stack)
+    local b = num(pop(stack))
+    local a = num(pop(stack))
     stack[#stack + 1] = bit.band(a, b)
   end,
 
@@ -247,6 +268,11 @@ instructions = {
   F64ConvertUI32 = function(stack)
     local a = pop(stack)
     stack[#stack + 1] = math.floor(math.abs(a))
+  end,
+  F64Div = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    stack[#stack + 1] = a / b
   end,
 
   GetGlobal = function(stack, instr, _, instance)
@@ -368,7 +394,7 @@ instructions = {
   end,
   Br = function(stack, instr, instrSet)
     if instr.imVal == 0 then
-      return stack.blocks[#stack.blocks] + 1
+      return (stack.blocks[#stack.blocks] or math.huge) + 1
     else
       local ptr
       for i = 1, instr.imVal do
