@@ -246,6 +246,16 @@ do
   handle:close()
 end
 
+local function linearRead(memory, offset, len)
+  local ptr = memory + offset
+  local val = ""
+  for i = 1, len do
+    val = val .. string.char(ptr[i - 1])
+  end
+
+  return val
+end
+
 local instance = loader.load(data)
 
 local width, height
@@ -257,7 +267,7 @@ end)
 
 local bufferStack = {}
 instance:link("env", "pushFromMemory", function(offset, length)
-  bufferStack[#bufferStack + 1] = instance.exports.memory:linearRead(offset, length)
+  bufferStack[#bufferStack + 1] = linearRead(instance.exports.memory, offset, length)
 end)
 
 instance:link("env", "print", function()
@@ -303,7 +313,7 @@ instance:link("env", "getNativeDisplayHeight", function()
 end)
 
 instance:link("env", "displayMemory", function(offset, length)
-  local disp = instance.exports.memory:linearRead(offset, length)
+  local disp = linearRead(instance.exports.memory, offset, length)
 
   for i = 1, width do
     for j = 1, height do

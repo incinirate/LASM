@@ -637,70 +637,29 @@ function compiler.newInstance(sectionData)
 
   t.source = t.source .. "}\n"
 
-  -- debugTrace("Source:\n" .. t.source)
   do
     local handle = fs.open("debug.out.lua", "w")
     handle:write(t.source)
     handle:close()
   end
 
-  print("DONE COMPILING")
-  shell.draw()
-
   local success, er = load(t.source)
   if not success then
     error("DID NOT COMPILE: " .. er)
   end
 
-  print("VALIDATED CHUNK")
-  shell.draw()
-
   local chunk = success()
-
-  print("LOADED CHUNK")
-  shell.draw()
-
-  chunk.importTable.env__setDisplayMode = function(a, b, c)
-    -- print(("%s, %s, %s"):format(a, b, c))
-  end
-
-  local bufferStack = {}
-  chunk.importTable.env__pushFromMemory = function(offset, len)
-    -- print(("%s, %s"):format(offset, len))
-    local ptr = chunk.exports.memory + offset
-    local val = ""
-    for i = 1, len do
-      val = val .. string.char(ptr[i - 1])
-    end
-
-    bufferStack[#bufferStack + 1] = val
-  end
-
-  chunk.importTable.env__print = function()
-    print(pop(bufferStack))
-  end
-
-  chunk.start()
-  chunk.exports.init()
-
-  print("INITIALIZED CHUNK")
-  shell.draw()
+  t.chunk = chunk
 
   setmetatable(t, {__index = compiler})
   return t
 end
 
-function compiler:indexMemory(index)
-  return self.memories[index]
-end
-
 function compiler:link(module, field, value)
-  local meta = self.importTable[module .. "::" .. field]
-  if meta then
-    meta[1][meta[2]] = value
+  local ref = self.chunk.importTable[mangleImport(module, field)]
+  if ref then
+    self.chunk.importTable[mangleImport(module, field)] = value
   end
 end
-
-
 
 return compiler

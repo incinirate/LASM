@@ -18,30 +18,8 @@ function loader.load(wasm)
   local sectionData = decoder.decode(wasm)
   local instance = compiler.newInstance(sectionData)
 
-  local exports = {}
-
-  -- Link exported functions
-  for k, v in pairs(sectionData[7]) do
-    if v.kind == kinds.Function then
-      -- exports[k] = function(...)
-      --   return instance:call(v.index, ...)
-      -- end
-    elseif v.kind == kinds.Memory then
-      exports[k] = instance:indexMemory(v.index)
-    elseif v.kind == kinds.Table then
-      exports[k] = instance.tables[v.index]
-    else
-      error("Unsupported export: '" .. v.kind .. "'", 0)
-    end
-  end
-
-  -- if sectionData[8] then
-  --   t.startFunc = function(...)
-  --     return instance:call(sectionData[8], ...)
-  --   end
-  -- end
-
-  t.exports = exports
+  t.startFunc = instance.chunk.start
+  t.exports = instance.chunk.exports
   t.instance = instance
   setmetatable(t, {__index = loader})
   return t
