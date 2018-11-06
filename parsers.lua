@@ -2,7 +2,7 @@ local parsers = {}
 
 function parsers.parseLEBu(stream, nBytes)
   local result, byte = 0
-  local bitCnt = (nBytes - 1) * 7
+  local bitCnt = nBytes * 7
   for shift = 0, bitCnt, 7 do
     byte, stream = stream:sub(1, 1):byte(), stream:sub(2)
     result = bit.bor(result, bit.lshift(bit.band(byte, 0x7F), shift))
@@ -16,7 +16,7 @@ end
 
 function parsers.parseLEBs(stream, nBytes)
   local result, byte = 0
-  local bitCnt = (nBytes - 1) * 7
+  local bitCnt = nBytes * 7
   local bitMask = 0
   for shift = 0, bitCnt, 7 do
     bitMask = bit.lshift(bitMask, 7) + 0x7F

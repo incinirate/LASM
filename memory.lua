@@ -7,6 +7,7 @@ function memory.new(pages)
   t.size = pages
   t.realSize = pages * pageSize
   t.data = ffi.new("uint8_t[" .. t.realSize .. "]")
+  t.data4 = ffi.cast("uint32_t*", t.data)
 
   setmetatable(t, {__index = memory})
   return t
@@ -31,12 +32,17 @@ end
 
 function memory:store(addr, value, size)
   if addr < 0 or addr > self.realSize - size then
+    -- print(addr .. " <= " .. value)
     error("Attempted store outside of allocated memory pages", 2)
   end
 
-  for i = 1, size do
-    self.data[addr + i - 1] = ffi.cast("uint8_t", value)
-    value = bit.rshift(value, 8)
+  if size == 4 then
+    self.data4[addr / 4] = value
+  else
+    for i = 1, size do
+      self.data[addr + i - 1] = bit.band(value, 0xFF)--ffi.cast("uint8_t", value)
+      value = bit.rshift(value, 8)
+    end
   end
 end
 

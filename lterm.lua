@@ -247,8 +247,11 @@ do
 end
 
 local instance = loader.load(data)
+
+local width, height
 instance:link("env", "setDisplayMode", function(a, b, c)
   debugTrace("DISPLAY: ", a, b, c)
+  width, height = b, c
   return
 end)
 
@@ -258,7 +261,7 @@ instance:link("env", "pushFromMemory", function(offset, length)
 end)
 
 instance:link("env", "print", function()
-  print(bufferStack[#bufferStack])
+  shell.write(bufferStack[#bufferStack])
   bufferStack[#bufferStack] = nil
 end)
 
@@ -281,7 +284,121 @@ instance:link("env", "focusInput", function(type)
   inputType = type
 end)
 
+instance:link("env", "shutdown", function()
+  print()
+  os.exit()
+end)
+
+local stepInterval = -1
+instance:link("env", "setStepInterval", function(ms)
+  stepInterval = ms/1000
+end)
+
+instance:link("env", "getNativeDisplayWidth", function()
+  return gpu.width
+end)
+
+instance:link("env", "getNativeDisplayHeight", function()
+  return gpu.height
+end)
+
+instance:link("env", "displayMemory", function(offset, length)
+  local disp = instance.exports.memory:linearRead(offset, length)
+
+  for i = 1, width do
+    for j = 1, height do
+      local ind = (j*width + i) * 4 + 1
+      local char = disp:sub(ind, ind):byte() or 0
+      local val = 3 * char / 255
+      gpu.drawPixel(i, j, math.floor(val))
+    end
+  end
+end)
+
+instance:link("env", "startTone", function() end)
+instance:link("env", "stopTone", function() end)
+
+
+instance:link("env", "getGameAxisX", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getGameAxisY", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getGameButtonA", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getGameButtonB", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getGameButtonX", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getGameButtonY", function()
+  return 0 -- TODO
+end)
+
+
 if instance.startFunc then
   instance.startFunc()
 end
 instance.exports.init()
+
+if instance.exports.step or instance.exports.display then
+  local running = true
+
+  local function event(e, ...)
+    if e == "key" then
+      local k = ...
+      if k == "escape" then
+        if instance.exports["break"] then
+          instance.exports["break"]()
+        end
+
+        running = false
+      end
+    end
+  end
+
+  local function update(dt)
+    if instance.exports.step then
+      for i = 1, 10 do
+        instance.exports.step(os.clock())
+      end
+    end
+  end
+
+  local function draw()
+    if instance.exports.display then
+      instance.exports.display(os.clock())
+    end
+
+    gpu.swap()
+  end
+
+  local eq = {}
+  local last = os.clock()
+  while running do
+    while true do
+      local a = {coroutine.yield()}
+      if not a[1] then break end
+      table.insert(eq, a)
+    end
+
+    while #eq > 0 do
+      event(unpack(table.remove(eq, 1)))
+    end
+
+    update(os.clock() - last)
+    last = os.clock()
+
+    draw()
+  end
+end
+
+print()

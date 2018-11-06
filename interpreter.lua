@@ -124,7 +124,12 @@ function intepreter:call(funcIndex, ...)
 
         local instr = instrSet[iPtr]
         if instructions[instr.enum] then
-          -- lastChk[#lastChk + 1] = printStack(stack, funcIndex .. " " .. iPtr .. " " .. instr.enum)
+          -- lastChk[#lastChk + 1] = 
+          -- if amtExecuted < 20000 then
+          --   print(printStack(stack, funcIndex .. " " .. iPtr .. " " .. instr.enum .. " "))
+          -- else
+          --   error()
+          -- end
           -- if #lastChk > 20 then
           --   table.remove(lastChk, 1)
           -- end
@@ -132,13 +137,16 @@ function intepreter:call(funcIndex, ...)
           byFunction[funcIndex] = byFunction[funcIndex] + 1
 
           local nPtr = instructions[instr.enum](stack, instr, instrSet, self, iPtr, funcIndex)
+          if type(stack[#stack]) == "boolean" then
+            stack[#stack] = stack[#stack] and 1 or 0
+          end
 
           if nPtr then
             iPtr = nPtr
             normalControl = false
           end
         else
-          error("Unsupported instruction '" .. instr.enum .. "'", 0)
+          error("Unsupported instruction '" .. instr.enum .. "' > " .. funcIndex .. " " .. iPtr, 0)
         end
 
         if normalControl then
@@ -189,11 +197,11 @@ end
 local function num(val)
   local t = type(val) 
   if t == "number" then
-    return t
+    return val
   elseif t == "boolean" then
-    return t == true and 1 or 0
+    return val == true and 1 or 0
   else
-    return tonumber(t)
+    return tonumber(val)
   end
 end
 
@@ -227,6 +235,11 @@ instructions = {
     local b = num(pop(stack))
     local a = num(pop(stack))
     stack[#stack + 1] = bit.band(a, b)
+  end,
+  I32Or = function(stack)
+    local b = num(pop(stack))
+    local a = num(pop(stack))
+    stack[#stack + 1] = bit.bor(a, b)
   end,
 
   I32GtU = function(stack)
@@ -265,9 +278,21 @@ instructions = {
   end,
 
 -- Special FLOAT OPS
+  I32TruncSF32 = function(stack)
+    local a = pop(stack)
+    stack[#stack + 1] = math.floor(a)
+  end,
+  I32TruncUF64 = function(stack)
+    local a = pop(stack)
+    stack[#stack + 1] = math.floor(a)
+  end,
+  I32TruncSF64 = function(stack)
+    local a = pop(stack)
+    stack[#stack + 1] = math.floor(a)
+  end,
   F64ConvertUI32 = function(stack)
     local a = pop(stack)
-    stack[#stack + 1] = math.floor(math.abs(a))
+    stack[#stack + 1] = math.abs(a)
   end,
   F64Div = function(stack)
     local b = pop(stack)
@@ -295,6 +320,9 @@ instructions = {
   SetLocal = function(stack, instr)
     local val = pop(stack)
     stack[instr.imVal + 1] = val
+  end,
+  TeeLocal = function(stack, instr)
+    stack[instr.imVal + 1] = stack[#stack]
   end,
 
   Call = function(stack, instr, _, instance)
@@ -338,15 +366,21 @@ instructions = {
 
     stack[#stack + 1] = val
   end,
-  I32Store = function(stack, _, _, instance)
+  I32Store = function(stack, _, _, instance, iPtr, fn)
     local value = pop(stack)
     local addr = pop(stack)
+    -- print("Store from " .. fn .. "@" .. iPtr .. " [" .. addr .. "]")
     instance.memories[0]:store(addr, value, 4)
   end,
   I32Store8 = function(stack, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
     instance.memories[0]:store(addr, value, 1)
+  end,
+  I32Store16 = function(stack, _, _, instance)
+    local value = pop(stack)
+    local addr = pop(stack)
+    instance.memories[0]:store(addr, value, 2)
   end,
   I32Load = function(stack, _, _, instance)
     local addr = pop(stack)
@@ -386,7 +420,10 @@ instructions = {
   end,
   If = function(stack, _, instrSet, _, iPtr)
     local cond = pop(stack)
-    if cond then
+    -- if cond == 0 then
+    --   print("oof cheif")
+    -- end
+    if cond ~= 0 then
       stack.blocks[#stack.blocks + 1] = iPtr
     else
       return skipBlock(iPtr, instrSet, true) + 1
@@ -406,7 +443,7 @@ instructions = {
   end,
   BrIf = function(stack, instr, instrSet)
     local cond = pop(stack)
-    if cond then
+    if cond ~= 0 then
       return instructions.Br(stack, instr, instrSet)
     end
   end,
@@ -432,9 +469,20 @@ do
   local i = instructions
   i.I64Const = i.I32Const
   i.I32LtS = i.I32LtU
+  i.I32LeS = i.I32LeU
+  i.I32GtS = i.I32GtU
+  i.I32GeS = i.I32GeU
 
   i.F64Const = i.I32Const
+  
+  i.F64Eq = i.I32Eq
   i.F64Ne = i.I32Ne
+  i.F64Gt = i.I32GtS
+  i.F64Lt = i.I32LtS
+
+  i.F64Mul = i.I32Mul
+  i.F64Add = i.I32Add
+  i.F64Sub = i.I32Sub
 end
 
 return intepreter
