@@ -23,9 +23,9 @@ function loader.load(wasm)
   -- Link exported functions
   for k, v in pairs(sectionData[7]) do
     if v.kind == kinds.Function then
-      exports[k] = function(...)
-        return instance:call(v.index, ...)
-      end
+      -- exports[k] = function(...)
+      --   return instance:call(v.index, ...)
+      -- end
     elseif v.kind == kinds.Memory then
       exports[k] = instance:indexMemory(v.index)
     elseif v.kind == kinds.Table then
@@ -35,11 +35,11 @@ function loader.load(wasm)
     end
   end
 
-  if sectionData[8] then
-    t.startFunc = function(...)
-      return instance:call(sectionData[8], ...)
-    end
-  end
+  -- if sectionData[8] then
+  --   t.startFunc = function(...)
+  --     return instance:call(sectionData[8], ...)
+  --   end
+  -- end
 
   t.exports = exports
   t.instance = instance

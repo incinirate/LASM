@@ -53,7 +53,7 @@ end
 ]],
   memory = [[
 local function storeMem(mem, memSize, addr, val, bytes)
-  print("Store " .. val .. "@" .. addr)
+  --print("Store " .. tonumber(val) .. "@" .. addr)
   if addr < 0 or addr > memSize*(2^16) then
     error("Attempt to store outside bounds", 2)
   end
@@ -65,7 +65,7 @@ local function storeMem(mem, memSize, addr, val, bytes)
   end
 end
 local function readMem(mem, memSize, addr, bytes)
-  print("Read @" .. addr)
+  --print("Read @" .. addr)
   if addr < 0 or addr > memSize*(2^16) then
     error("Attempt to read outside bounds " .. addr, 2)
   end
@@ -150,7 +150,7 @@ generators = {
     local sig = instance.sectionData[1][fnKind]
     local passingArguments = {}
     for i = 1, #sig.params do
-      passingArguments[#passingArguments + 1] = pop(stack)
+      passingArguments[#sig.params - i + 1] = pop(stack)
     end
 
     local results = {}
@@ -291,7 +291,7 @@ generators = {
 
   Block = function(stack, instr, argList, fnLocals, blockStack, instance, customDo)
     customDo = customDo or "do"
-      print("BLOCK: " .. instr.imVal)
+      --print("BLOCK: " .. instr.imVal)
     if instr.imVal == -0x40 then
       -- Block does not return anything
       local blockLabel = makeName()
@@ -412,7 +412,7 @@ generators = {
   F64Store = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return "error('bad CALL')"--([[  ffi.cast("double*", %s + %s)[0] = %s%s]]):format(instance.memories[0], addr, value, "\n")
+    return ([[  ffi.cast("double*", %s + %s)[0] = %s%s]]):format(instance.memories[0], addr, value, "\n")
   end,
   MemorySize = function(stack, _, _, _, _, instance)
     push(stack, instance.memories[0] .. "Size")
@@ -468,6 +468,9 @@ function compiler.newInstance(sectionData)
   -- TODO setup globals DONE?
   -- TODO setup table
   
+  print("STARTED COMPILATION")
+  shell.draw()
+
   t.source = ""
 
   t.importTable = {}
@@ -598,6 +601,12 @@ function compiler.newInstance(sectionData)
 
   t.source = t.source .. "return { "
 
+  -- Import Linking
+  if sectionData[2] then
+    -- TODO other imports
+    t.source = t.source .. "importTable = imports, "
+  end
+
   -- Exports
   if sectionData[7] then
     t.source = t.source .. "exports = { "
@@ -628,19 +637,54 @@ function compiler.newInstance(sectionData)
 
   t.source = t.source .. "}\n"
 
-  debugTrace("Source:\n" .. t.source)
+  -- debugTrace("Source:\n" .. t.source)
   do
     local handle = fs.open("debug.out.lua", "w")
     handle:write(t.source)
     handle:close()
   end
 
+  print("DONE COMPILING")
+  shell.draw()
+
   local success, er = load(t.source)
   if not success then
     error("DID NOT COMPILE: " .. er)
   end
 
-  print(success().start())
+  print("VALIDATED CHUNK")
+  shell.draw()
+
+  local chunk = success()
+
+  print("LOADED CHUNK")
+  shell.draw()
+
+  chunk.importTable.env__setDisplayMode = function(a, b, c)
+    -- print(("%s, %s, %s"):format(a, b, c))
+  end
+
+  local bufferStack = {}
+  chunk.importTable.env__pushFromMemory = function(offset, len)
+    -- print(("%s, %s"):format(offset, len))
+    local ptr = chunk.exports.memory + offset
+    local val = ""
+    for i = 1, len do
+      val = val .. string.char(ptr[i - 1])
+    end
+
+    bufferStack[#bufferStack + 1] = val
+  end
+
+  chunk.importTable.env__print = function()
+    print(pop(bufferStack))
+  end
+
+  chunk.start()
+  chunk.exports.init()
+
+  print("INITIALIZED CHUNK")
+  shell.draw()
 
   setmetatable(t, {__index = compiler})
   return t
