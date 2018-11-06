@@ -347,7 +347,9 @@ end)
 if instance.startFunc then
   instance.startFunc()
 end
-instance.exports.init()
+if instance.exports.init then
+  instance.exports.init()
+end
 
 if instance.exports.step or instance.exports.display then
   local running = true

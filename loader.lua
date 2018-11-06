@@ -1,7 +1,7 @@
 local decoder = require("decoder")
 local opcodes = require("opcodes")
 local parsers = require("parsers")
-local interpreter = require("interpreter")
+local compiler = require("compiler")
 
 local loader = {}
 
@@ -16,7 +16,7 @@ function loader.load(wasm)
   local t = {}
 
   local sectionData = decoder.decode(wasm)
-  local instance = interpreter.newInstance(sectionData)
+  local instance = compiler.newInstance(sectionData)
 
   local exports = {}
 
