@@ -260,6 +260,7 @@ local instance = loader.load(data)
 
 local width, height
 instance:link("env", "setDisplayMode", function(a, b, c)
+  -- TODO: actually have a difference between the modes
   debugTrace("DISPLAY: ", a, b, c)
   width, height = b, c
   return

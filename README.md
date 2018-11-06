@@ -1,8 +1,8 @@
 # LASM
-## Lua WASM Interpreter
+## Lua WASM Compiler/Interpreter
 
-Interpreter for WASM written in Lua.
-Major WIP, I make no guarentees to the accuracy of interpretation.
+Compiler/Interpreter for WASM written in Lua.
+Major WIP, I make no guarentees to the accuracy of compilation/interpretation.
 
 **LuaJIT FFI is required.**
 
