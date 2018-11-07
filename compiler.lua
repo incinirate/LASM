@@ -64,6 +64,18 @@ local function storeMem(mem, memSize, addr, val, bytes)
     ffi.cast("int" .. bytes .. "_t*", mem + addr)[0] = val
   end
 end
+local function storeFloat(mem, memSize, addr, val, bytes)
+  val = val or 0
+  if addr < 0 or addr > memSize*(2^16) then
+    error("Attempt to store outside bounds", 2)
+  end
+  
+  if bytes == 8 then
+    ffi.cast("double*", mem + addr)[0] = val
+  else
+    ffi.cast("float*", mem + addr)[0] = val
+  end
+end
 local function readMem(mem, memSize, addr, bytes)
   --print("Read @" .. addr)
   if addr < 0 or addr > memSize*(2^16) then
@@ -75,7 +87,10 @@ local function readMem(mem, memSize, addr, bytes)
     return ffi.cast("int" .. bytes .. "_t*", mem + addr)[0]
   end
 end
-  ]]
+]],
+cache = [[
+local bit = require("bit")
+]]
 }
 
 local function tee(stack, offset)
@@ -119,6 +134,15 @@ generators = {
       return ("  %s = %s\n"):format(argList[index + 1], pop(stack))
     else
       return ("  %s = %s\n"):format(fnLocals[index - #argList + 1], pop(stack))
+    end
+  end,
+  TeeLocal = function(stack, instr, argList, fnLocals)
+    local index = instr.imVal
+
+    if index < #argList then
+      return ("  %s = %s\n"):format(argList[index + 1], tee(stack))
+    else
+      return ("  %s = %s\n"):format(fnLocals[index - #argList + 1], tee(stack))
     end
   end,
 
@@ -184,7 +208,33 @@ generators = {
   I32DivU = function(stack)
     local b = pop(stack)
     local a = pop(stack)
+    push(stack, ("(math.abs(math.floor(%s / %s)))"):format(a, b))
+  end,
+  I32DivS = function(stack)
+    -- This is wrong
+    local b = pop(stack)
+    local a = pop(stack)
     push(stack, ("(math.floor(%s / %s))"):format(a, b))
+  end,
+  I32RemU = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(math.floor(%s %% %s))"):format(a, b))
+  end,
+  I32Shl = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(bit.lshift(%s, %s))"):format(a, b))
+  end,
+  I32ShrU = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(bit.rshift(%s, %s))"):format(a, b))
+  end,
+  I32ShrS = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(bit.arshift(%s, %s))"):format(a, b))
   end,
   I32And = function(stack)
     local b = pop(stack)
@@ -195,6 +245,16 @@ generators = {
     local b = pop(stack)
     local a = pop(stack)
     push(stack, ("(bit.bor(%s, %s))"):format(a, b))
+  end,
+  I32Rotr = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(bit.ror(%s, %s))"):format(a, b))
+  end,
+  I32Rotl = function(stack)
+    local b = pop(stack)
+    local a = pop(stack)
+    push(stack, ("(bit.rol(%s, %s))"):format(a, b))
   end,
   I32Const = function(stack, instr)
     push(stack, tostring(instr.imVal))
@@ -289,7 +349,7 @@ generators = {
     push(stack, ("math.max(%s, %s)"):format(a, b))
   end,
 
-  Block = function(stack, instr, argList, fnLocals, blockStack, instance, customDo)
+  Block = function(stack, instr, argList, fnLocals, blockStack, instance, fn, customDo)
     customDo = customDo or "do"
       --print("BLOCK: " .. instr.imVal)
     if instr.imVal == -0x40 then
@@ -317,9 +377,9 @@ generators = {
   Loop = function(stack, instr, a, b, blockStack)
     return generators.Block(stack, instr, a, b, blockStack)
   end,
-  If = function(stack, instr, a, b, blockStack, c)
+  If = function(stack, instr, a, b, blockStack, c, d)
     local cond = pop(stack)
-    return generators.Block(stack, instr, a, b, blockStack, c, ("if checkCondition(%s) then"):format(cond))
+    return generators.Block(stack, instr, a, b, blockStack, c, d, ("if checkCondition(%s) then"):format(cond))
   end,
   Else = function(stack, _, _, _, blockStack)
     local effect = ""
@@ -338,7 +398,7 @@ generators = {
 
     return ("::%sFinish::\n  %s  end\n"):format(block.label, effect)
   end,
-  BrIf = function(stack, instr, a, b, blockStack)
+  BrIf = function(stack, instr, a, b, blockStack, c, fn)
     local cond = pop(stack)
     local effect = ""
     for i = 0, instr.imVal - 1 do
@@ -347,17 +407,25 @@ generators = {
       end, false, false)
     end
 
+    if instr.imVal == #blockStack then
+      return generators.Return(stack, instr, a, b, blockStack, c, fn)
+    end
+
     local breakLabel = tee(blockStack, instr.imVal).label
     local breakInstr = jumpInstr(instr.imVal)
 
     return ("  if checkCondition(%s) then\n  %s    goto %s%s\n  end\n"):format(cond, effect, breakLabel, breakInstr)
   end,
-  Br = function(stack, instr, a, b, blockStack)
+  Br = function(stack, instr, a, b, blockStack, c, fn)
     local effect = ""
     for i = 0, instr.imVal - 1 do
       tee(blockStack).exit(function(str)
         effect = effect .. (str or "")
       end, false, false)
+    end
+
+    if instr.imVal == #blockStack then
+      return generators.Return(stack, instr, a, b, blockStack, c, fn)
     end
 
     local jumpLabel = tee(blockStack, instr.imVal).label
@@ -371,30 +439,30 @@ generators = {
 
   I32Load = function(stack, _, _, _, _, instance)
     local addr = pop(stack)
-    push(stack, ([[(readMem(%s, 2, %s, 32))]]):format(instance.memories[0], addr)) -- ffi.cast("uint32_t*", %s + %s)[0]
+    push(stack, ([[(readMem(%s, %sSize, %s, 32))]]):format(instance.memories[0], instance.memories[0], addr)) -- ffi.cast("uint32_t*", %s + %s)[0]
   end,
   I32Load8U = function(stack, _, _, _, _, instance)
     local addr = pop(stack)
-    push(stack, ([[(readMem(%s, 2, %s, 8))]]):format(instance.memories[0], addr)) -- ffi.cast("uint8_t*", %s + %s)[0]
+    push(stack, ([[(readMem(%s, %sSize, %s, 8))]]):format(instance.memories[0], instance.memories[0], addr)) -- ffi.cast("uint8_t*", %s + %s)[0]
   end,
   I32Load16U = function(stack, _, _, _, _, instance)
     local addr = pop(stack)
-    push(stack, ([[(readMem(%s, 2, %s, 16))]]):format(instance.memories[0], addr)) -- ffi.cast("uint16_t*", %s + %s)[0]
+    push(stack, ([[(readMem(%s, %sSize, %s, 16))]]):format(instance.memories[0], instance.memories[0], addr)) -- ffi.cast("uint16_t*", %s + %s)[0]
   end,
   I32Store = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return ([[  storeMem(%s, 2, %s, %s, 32)]]):format(instance.memories[0], addr, value, "\n") -- ffi.cast("uint32_t*", %s + %s)[0] = %s%s
+    return ([[  storeMem(%s, %sSize, %s, %s, 32)]] .. "\n"):format(instance.memories[0], instance.memories[0], addr, value, "\n") -- ffi.cast("uint32_t*", %s + %s)[0] = %s%s
   end,
   I32Store8 = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return ([[  storeMem(%s, 2, %s, %s, 8)]]):format(instance.memories[0], addr, value, "\n") -- ffi.cast("uint8_t*", %s + %s)[0] = %s%s
+    return ([[  storeMem(%s, %sSize, %s, %s, 8)]] .. "\n"):format(instance.memories[0], instance.memories[0], addr, value, "\n") -- ffi.cast("uint8_t*", %s + %s)[0] = %s%s
   end,
   I32Store16 = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return ([[  storeMem(%s, 2, %s, %s, 16)]]):format(instance.memories[0], addr, value, "\n") -- ffi.cast("uint16_t*", %s + %s)[0] = %s%s
+    return ([[  storeMem(%s, %sSize, %s, %s, 16)]] .. "\n"):format(instance.memories[0], instance.memories[0], addr, value, "\n") -- ffi.cast("uint16_t*", %s + %s)[0] = %s%s
   end,
   I64Load = function(stack, _, _, _, _, instance)
     local addr = pop(stack)
@@ -403,7 +471,7 @@ generators = {
   I64Store = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return ([[  storeMem(%s, 2, %s, %s, 64)]]):format(instance.memories[0], addr, value, "\n") -- ffi.cast("uint64_t*", %s + %s)[0] = %s%s
+    return ([[  storeMem(%s, %sSize, %s, %s, 64)]] .. "\n"):format(instance.memories[0], instance.memories[0], addr, value, "\n") -- ffi.cast("uint64_t*", %s + %s)[0] = %s%s
   end,
   F64Load = function(stack, _, _, _, _, instance)
     local addr = pop(stack)
@@ -412,20 +480,29 @@ generators = {
   F64Store = function(stack, _, _, _, _, instance)
     local value = pop(stack)
     local addr = pop(stack)
-    return ([[  ffi.cast("double*", %s + %s)[0] = %s%s]]):format(instance.memories[0], addr, value, "\n")
+    return ([[  storeFloat(%s, %sSize, %s, %s, 8)]]):format(instance.memories[0], instance.memories[0], addr, value, "\n") -- ffi.cast("double*", %s + %s)[0] = %s%s
   end,
   MemorySize = function(stack, _, _, _, _, instance)
     push(stack, instance.memories[0] .. "Size")
   end,
-  MemoryGrow = function(stack)
+  MemoryGrow = function(stack, _, _, _, _, instance)
+    local temp = makeName()
     local delta = pop(stack)
     push(stack, 2)
-    return [[  error("MemoryGrow NYI")]] .. "\n"
+    return ([[  local %s = ffi.new("uint8_t[" .. (%sSize + %d)*%d .. "]")
+  ffi.copy(%s, %s, %sSize*%d)
+  %s, %sSize = %s, (%sSize + %d)
+]]):format(temp, instance.memories[0], delta, pageSize,
+           temp, instance.memories[0], instance.memories[0], pageSize,
+           instance.memories[0], instance.memories[0], temp, instance.memories[0], delta)
   end,
 
-  Return = function(stack)
+  Return = function(stack, _, _, _, _, instance, fn)
+    local fnKind = instance.sectionData[3][fn]
+    local sig = instance.sectionData[1][fnKind]
+
     local results = {}
-    while #stack > 0 do
+    for i = 1, #sig.returns do
       push(results, pop(stack))
     end
 
@@ -447,6 +524,7 @@ do -- Redundant Generators
 
   g.F64Ne = g.I32Ne
   g.F64Eq = g.I32Eq
+  g.F64Ge = g.I32GeU
   g.F64Gt = g.I32GtU
   g.F64Lt = g.I32LtU
   g.F64Le = g.I32LeU
@@ -498,6 +576,7 @@ function compiler.newInstance(sectionData)
     t.source = t.source .. "}\n" .. prefabs.unlinked
   end
 
+  t.source = t.source .. prefabs.cache
   t.source = t.source .. prefabs.ifTrue
   t.source = t.source .. prefabs.memory
 
@@ -527,7 +606,10 @@ function compiler.newInstance(sectionData)
   if sectionData[9] then
     -- Setup tables TODO:
     for k, v in pairs(sectionData[9]) do
-      t.tables[k] = v
+      -- t.tables[k] = v
+      local name = makeName()
+      t.tables[k] = name
+      t.source = t.source .. ("local %s = { %s }\n"):format(name, table.concat(v, ", "))
     end
   end
 
@@ -581,7 +663,7 @@ function compiler.newInstance(sectionData)
     -- Generate opcode instructions
     for i, instr in ipairs(v.instructions) do
       if generators[instr.enum] then
-        local out = generators[instr.enum](valueStack, instr, argList, fnLocals, blockStack, t)
+        local out = generators[instr.enum](valueStack, instr, argList, fnLocals, blockStack, t, k)
         if out then
           t.source = t.source .. out
         end
@@ -620,7 +702,8 @@ function compiler.newInstance(sectionData)
       elseif v.kind == kinds.Memory then
         t.source = t.source .. ("%s = %s, "):format(k, t.memories[v.index])
         -- exports[k] = instance:indexMemory(v.index)
-      -- elseif v.kind == kinds.Table then
+      elseif v.kind == kinds.Table then
+        t.source = t.source .. ("%s = %s, "):format(k, t.tables[v.index])
         -- exports[k] = instance.tables[v.index]
       else
         error("Unsupported export: '" .. v.kind .. "'", 0)
@@ -643,6 +726,8 @@ function compiler.newInstance(sectionData)
     handle:close()
   end
 
+  debugTrace(t.source)
+
   local success, er = load(t.source)
   if not success then
     error("DID NOT COMPILE: " .. er)
@@ -656,9 +741,11 @@ function compiler.newInstance(sectionData)
 end
 
 function compiler:link(module, field, value)
-  local ref = self.chunk.importTable[mangleImport(module, field)]
-  if ref then
-    self.chunk.importTable[mangleImport(module, field)] = value
+  if self.chunk.importTable then
+    local ref = self.chunk.importTable[mangleImport(module, field)]
+    if ref then
+      self.chunk.importTable[mangleImport(module, field)] = value
+    end
   end
 end
 

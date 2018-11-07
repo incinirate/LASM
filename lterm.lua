@@ -314,13 +314,14 @@ instance:link("env", "getNativeDisplayHeight", function()
 end)
 
 instance:link("env", "displayMemory", function(offset, length)
-  local disp = linearRead(instance.exports.memory, offset, length)
+  -- local disp = linearRead(instance.exports.memory, offset, length)
+  local ptr = instance.exports.memory + offset
 
   for i = 1, width do
     for j = 1, height do
       local ind = (j*width + i) * 4 + 1
-      local char = disp:sub(ind, ind):byte() or 0
-      local val = 3 * char / 255
+      local char = ptr[ind] or 0
+      local val = 2550 * char / 255
       gpu.drawPixel(i, j, math.floor(val))
     end
   end
@@ -352,6 +353,11 @@ end)
 
 instance:link("env", "getGameButtonY", function()
   return 0 -- TODO
+end)
+
+
+instance:link("Math", "random", function()
+  return math.random()
 end)
 
 
