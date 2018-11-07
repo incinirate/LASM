@@ -1,5 +1,7 @@
 local loader = require("loader")
 
+local scale = 1
+
 local pretty
 do
   local inputColor, outputColor, errorColor = 11, 12, 8
@@ -261,14 +263,23 @@ local instance = loader.load(data)
 local width, height
 instance:link("env", "setDisplayMode", function(a, b, c)
   -- TODO: actually have a difference between the modes
-  debugTrace("DISPLAY: ", a, b, c)
+  -- debugTrace("DISPLAY: ", a, b, c)
   width, height = b, c
-  return
+  return 1
 end)
 
 local bufferStack = {}
 instance:link("env", "pushFromMemory", function(offset, length)
   bufferStack[#bufferStack + 1] = linearRead(instance.exports.memory, offset, length)
+end)
+
+instance:link("env", "popToMemory", function(offset, length)
+  local str = bufferStack[#bufferStack]
+  bufferStack[#bufferStack] = nil
+
+  for i = 1, #str do
+    instance.exports.memory[i - 1] = str:sub(i, i):byte()
+  end
 end)
 
 instance:link("env", "print", function()
@@ -314,29 +325,31 @@ instance:link("env", "getNativeDisplayHeight", function()
 end)
 
 instance:link("env", "displayMemory", function(offset, length)
-  -- local disp = linearRead(instance.exports.memory, offset, length)
   local ptr = instance.exports.memory + offset
 
   for i = 1, width do
     for j = 1, height do
-      local ind = (j*width + i) * 4 + 1
+      local ind = ((j - 1)*width + (i - 1)) * 4
       local char = ptr[ind] or 0
-      local val = 2550 * char / 255
-      gpu.drawPixel(i, j, math.floor(val))
+      local val = 16 * char / 255
+
+      gpu.drawRectangle((i - 1)*scale, (j - 1)*scale, scale, scale, math.floor(val))
     end
   end
+
+  return 
 end)
 
-instance:link("env", "startTone", function() end)
+instance:link("env", "startTone", function() speaker.play({channel = 1, frequency = 523, time = 1/60, shift = 0, volume = 0.1, attack = 0, release = 0}) end)
 instance:link("env", "stopTone", function() end)
 
-
+local xAxis, yAxis = 0, 0
 instance:link("env", "getGameAxisX", function()
-  return 0 -- TODO
+  return xAxis -- TODO
 end)
 
 instance:link("env", "getGameAxisY", function()
-  return 0 -- TODO
+  return yAxis -- TODO
 end)
 
 instance:link("env", "getGameButtonA", function()
@@ -352,6 +365,31 @@ instance:link("env", "getGameButtonX", function()
 end)
 
 instance:link("env", "getGameButtonY", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getMousePressed", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getInputText", function()
+  bufferStack[#bufferStack + 1] = ""
+  return 0 -- TODO
+end)
+
+instance:link("env", "getInputPosition", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getInputSelected", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getMouseX", function()
+  return 0 -- TODO
+end)
+
+instance:link("env", "getMouseY", function()
   return 0 -- TODO
 end)
 
@@ -380,15 +418,32 @@ if instance.exports.step or instance.exports.display then
         end
 
         running = false
+      elseif k == "left" then
+        xAxis = -1
+      elseif k == "right" then
+        xAxis = 1
+      elseif k == "up" then
+        yAxis = -1
+      elseif k == "down" then
+        yAxis = 1
+      end
+    elseif e == "keyUp" then
+      local k = ...
+      if k == "left" then
+        xAxis = 0
+      elseif k == "right" then
+        xAxis = 0
+      elseif k == "up" then
+        yAxis = 0
+      elseif k == "down" then
+        yAxis = 0
       end
     end
   end
 
   local function update(dt)
     if instance.exports.step then
-      for i = 1, 10 do
-        instance.exports.step(os.clock())
-      end
+      instance.exports.step(os.clock())
     end
   end
 

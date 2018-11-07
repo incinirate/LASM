@@ -32,10 +32,24 @@ local function mangleImport(ns, field)
   return ns .. "__" .. field
 end
 
-local nameCounter = 0
-local function makeName()
-  nameCounter = nameCounter + 1
-  return "var" .. nameCounter
+local nameDebug = false
+nameCounter = 0
+nameAB = ("A"):byte()
+function makeName()
+  if nameDebug then
+    nameCounter = nameCounter + 1
+    return "var" .. nameCounter
+  else
+    local build = ""
+    local thisCount = nameCounter
+    repeat
+      build = string.char(nameAB + (thisCount % 26)) .. build
+      thisCount = math.floor(thisCount / 26)
+    until thisCount == 0
+
+    nameCounter = nameCounter + 1
+    return build
+  end
 end
 
 local prefabs = {
@@ -53,7 +67,6 @@ end
 ]],
   memory = [[
 local function storeMem(mem, memSize, addr, val, bytes)
-  --print("Store " .. tonumber(val) .. "@" .. addr)
   if addr < 0 or addr > memSize*(2^16) then
     error("Attempt to store outside bounds", 2)
   end
@@ -77,7 +90,6 @@ local function storeFloat(mem, memSize, addr, val, bytes)
   end
 end
 local function readMem(mem, memSize, addr, bytes)
-  --print("Read @" .. addr)
   if addr < 0 or addr > memSize*(2^16) then
     error("Attempt to read outside bounds " .. addr, 2)
   end
@@ -108,8 +120,8 @@ local function push(stack, val)
   stack[#stack + 1] = val
 end
 
-local function jumpInstr(imVal)
-  if imVal == 0 then
+local function jumpInstr(loopQ)
+  if loopQ then
     return "Start"
   else
     return "Finish"
@@ -349,15 +361,15 @@ generators = {
     push(stack, ("math.max(%s, %s)"):format(a, b))
   end,
 
-  Block = function(stack, instr, argList, fnLocals, blockStack, instance, fn, customDo)
+  Block = function(stack, instr, argList, fnLocals, blockStack, instance, fn, customDo, loopq)
+    loopq = loopq or false
     customDo = customDo or "do"
-      --print("BLOCK: " .. instr.imVal)
     if instr.imVal == -0x40 then
       -- Block does not return anything
       local blockLabel = makeName()
       push(blockStack, {label = blockLabel, exit = function()
         -- We got popped by an 'End', but we have nothing to return
-      end})
+      end, loop = loopq})
       return ("  %s ::%sStart::\n"):format(customDo, blockLabel)
     else
       -- Block returns something
@@ -370,12 +382,12 @@ generators = {
         if shouldAct then
           push(stack, blockResult)
         end
-      end})
+      end, loop = loopq})
       return ("  local %s\n  %s ::%sStart::\n"):format(blockResult, customDo, blockLabel)
     end
   end,
   Loop = function(stack, instr, a, b, blockStack)
-    return generators.Block(stack, instr, a, b, blockStack)
+    return generators.Block(stack, instr, a, b, blockStack, nil, nil, nil, true)
   end,
   If = function(stack, instr, a, b, blockStack, c, d)
     local cond = pop(stack)
@@ -408,13 +420,15 @@ generators = {
     end
 
     if instr.imVal == #blockStack then
-      return generators.Return(stack, instr, a, b, blockStack, c, fn)
+      local retInstr = generators.Return(stack, instr, a, b, blockStack, c, fn)
+      return ("  if checkCondition(%s) then\n  %s    %s\n  end\n"):format(cond, effect, retInstr)
+    else
+      local block = tee(blockStack, instr.imVal)
+      local breakLabel = block.label
+      local breakInstr = jumpInstr(block.loop)
+
+      return ("  if checkCondition(%s) then\n  %s    goto %s%s\n  end\n"):format(cond, effect, breakLabel, breakInstr)
     end
-
-    local breakLabel = tee(blockStack, instr.imVal).label
-    local breakInstr = jumpInstr(instr.imVal)
-
-    return ("  if checkCondition(%s) then\n  %s    goto %s%s\n  end\n"):format(cond, effect, breakLabel, breakInstr)
   end,
   Br = function(stack, instr, a, b, blockStack, c, fn)
     local effect = ""
@@ -428,8 +442,9 @@ generators = {
       return generators.Return(stack, instr, a, b, blockStack, c, fn)
     end
 
-    local jumpLabel = tee(blockStack, instr.imVal).label
-    local jumpInstr = jumpInstr(instr.imVal)
+    local block = tee(blockStack, instr.imVal)
+    local jumpLabel = block.label
+    local jumpInstr = jumpInstr(block.loop)
 
     return ("%s goto %s%s\n"):format(effect, jumpLabel, jumpInstr)
   end,
@@ -489,12 +504,26 @@ generators = {
     local temp = makeName()
     local delta = pop(stack)
     push(stack, 2)
+
+    -- TODO: find a better way to do this
+    local extraLogic = ""
+    if instance.sectionData[7] then
+      for k, v in pairs(instance.sectionData[7]) do
+        if v.kind == kinds.Memory then
+          -- FIXME: This won't work after wasm MVP, because multiple memories
+          extraLogic = ([[
+  exportTable.%s = %s
+]]):format(k, instance.memories[0])
+        end
+      end
+    end
+
     return ([[  local %s = ffi.new("uint8_t[" .. (%sSize + %d)*%d .. "]")
   ffi.copy(%s, %s, %sSize*%d)
   %s, %sSize = %s, (%sSize + %d)
 ]]):format(temp, instance.memories[0], delta, pageSize,
            temp, instance.memories[0], instance.memories[0], pageSize,
-           instance.memories[0], instance.memories[0], temp, instance.memories[0], delta)
+           instance.memories[0], instance.memories[0], temp, instance.memories[0], delta) .. extraLogic
   end,
 
   Return = function(stack, _, _, _, _, instance, fn)
@@ -507,6 +536,9 @@ generators = {
     end
 
     return ("  if true then return %s end\n"):format(table.concat(results, ", "))
+  end,
+  Unreachable = function()
+    return "  error(\"Unreachable code reached..\", 2)\n"
   end,
   Nop = function() end
 }
@@ -532,6 +564,8 @@ do -- Redundant Generators
   g.F64Add = g.I32Add
   g.F64Sub = g.I32Sub
   g.F64Mul = g.I32Mul
+
+  g.I32TruncSF32 = g.I32TruncSF64
 
   g.F64ConvertSI32 = g.Nop
 end
@@ -567,11 +601,6 @@ function compiler.newInstance(sectionData)
       t.functionImportCount = t.functionImportCount + 1
 
       t.source = t.source .. ("%s = 0,"):format(mangleImport(v.module, v.field))
-
-      -- t.importTable[v.module .. "::" .. v.field] = {t.functions, k}
-      -- t.functions[k] = function()
-      --   error("Unlinked function '" .. v.module .. "::" .. v.field .. "'")
-      -- end
     end
     t.source = t.source .. "}\n" .. prefabs.unlinked
   end
@@ -579,6 +608,11 @@ function compiler.newInstance(sectionData)
   t.source = t.source .. prefabs.cache
   t.source = t.source .. prefabs.ifTrue
   t.source = t.source .. prefabs.memory
+
+  if sectionData[7] then
+    -- Forward declare export section so that we can swap out entries at runtime
+    t.source = t.source .. "local exportTable = {}"
+  end
 
   if sectionData[5] then
     -- Setup memory
@@ -593,11 +627,6 @@ function compiler.newInstance(sectionData)
   if sectionData[6] then
     -- Setup globals
     for k, v in pairs(sectionData[6]) do
-      -- t.globals[k] = {
-      --   type = v.type,
-      --   mutable = v.mutability,
-      --   value = v.value
-      -- }
       t.globals[k] = makeName()
       t.source = t.source .. ("local %s = %d\n"):format(t.globals[k], v.value)
     end
@@ -606,7 +635,6 @@ function compiler.newInstance(sectionData)
   if sectionData[9] then
     -- Setup tables TODO:
     for k, v in pairs(sectionData[9]) do
-      -- t.tables[k] = v
       local name = makeName()
       t.tables[k] = name
       t.source = t.source .. ("local %s = { %s }\n"):format(name, table.concat(v, ", "))
@@ -618,7 +646,6 @@ function compiler.newInstance(sectionData)
       local segment = sectionData[11][i]
 
       t.source = t.source .. constMemoryStore(t.memories[segment.index], segment.addr, segment.data)
-      -- t.memories[segment.index]:linearStore(segment.addr, segment.data)
     end
   end
 
@@ -648,9 +675,7 @@ function compiler.newInstance(sectionData)
     t.source = t.source .. ("function %s(%s)\n"):format(fnName, table.concat(argList, ", "))
 
     -- Function stack, used only for generation, we can optimize away the stack using inlining
-    local valueStack = {
-      -- generator
-    }
+    local valueStack = {}
     local blockStack = {}
 
     -- Generate function locals
@@ -681,36 +706,32 @@ function compiler.newInstance(sectionData)
     t.source = t.source .. "end\n"
   end
 
+  -- Exports
+  if sectionData[7] then
+    for k, v in pairs(sectionData[7]) do
+      t.source = t.source .. "exportTable."
+      if v.kind == kinds.Function then
+        t.source = t.source .. ("%s = %s\n"):format(k, t.functions[v.index].name)
+      elseif v.kind == kinds.Memory then
+        t.source = t.source .. ("%s = %s\n"):format(k, t.memories[v.index])
+      elseif v.kind == kinds.Table then
+        t.source = t.source .. ("%s = %s\n"):format(k, t.tables[v.index])
+      else
+        error("Unsupported export: '" .. v.kind .. "'", 0)
+      end
+    end
+  end
+
   t.source = t.source .. "return { "
+
+  if sectionData[7] then
+    t.source = t.source .. "exports = exportTable, "
+  end
 
   -- Import Linking
   if sectionData[2] then
     -- TODO other imports
     t.source = t.source .. "importTable = imports, "
-  end
-
-  -- Exports
-  if sectionData[7] then
-    t.source = t.source .. "exports = { "
-
-    for k, v in pairs(sectionData[7]) do
-      if v.kind == kinds.Function then
-        t.source = t.source .. ("%s = %s, "):format(k, t.functions[v.index].name)
-        -- exports[k] = function(...)
-        --   return instance:call(v.index, ...)
-        -- end
-      elseif v.kind == kinds.Memory then
-        t.source = t.source .. ("%s = %s, "):format(k, t.memories[v.index])
-        -- exports[k] = instance:indexMemory(v.index)
-      elseif v.kind == kinds.Table then
-        t.source = t.source .. ("%s = %s, "):format(k, t.tables[v.index])
-        -- exports[k] = instance.tables[v.index]
-      else
-        error("Unsupported export: '" .. v.kind .. "'", 0)
-      end
-    end
-
-    t.source = t.source .. "}, "
   end
 
   if sectionData[8] then

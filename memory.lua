@@ -13,6 +13,17 @@ function memory.new(pages)
   return t
 end
 
+function memory:expand(pages)
+  local oldSize = self.size
+  self.size = pages
+  self.realSize = pages * pageSize
+  local newData = ffi.new("uint8_t[" .. self.realSize .. "]")
+  local newData4 = ffi.cast("uint32_t*", self.data)
+  ffi.copy(newData, self.data, oldSize)
+  self.data = newData
+  self.data4 = newData4
+end
+
 function memory:read(addr, size)
   if addr < 0 or addr > self.realSize - size then
     error("Attempted read outside of allocated memory pages", 2)
@@ -32,7 +43,6 @@ end
 
 function memory:store(addr, value, size)
   if addr < 0 or addr > self.realSize - size then
-    -- print(addr .. " <= " .. value)
     error("Attempted store outside of allocated memory pages", 2)
   end
 
@@ -40,7 +50,7 @@ function memory:store(addr, value, size)
     self.data4[addr / 4] = value
   else
     for i = 1, size do
-      self.data[addr + i - 1] = bit.band(value, 0xFF)--ffi.cast("uint8_t", value)
+      self.data[addr + i - 1] = bit.band(value, 0xFF)
       value = bit.rshift(value, 8)
     end
   end

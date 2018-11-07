@@ -100,7 +100,6 @@ local byFunction = {}
 
 function intepreter:call(funcIndex, ...)
   if self.functions[funcIndex] then
-    -- print("Entering " .. funcIndex .. " with " .. table.concat({...}, ", "))
     byFunction[funcIndex] = byFunction[funcIndex] or 0
     local fn = self.functions[funcIndex]
     if type(fn) == "function" then
@@ -124,15 +123,6 @@ function intepreter:call(funcIndex, ...)
 
         local instr = instrSet[iPtr]
         if instructions[instr.enum] then
-          -- lastChk[#lastChk + 1] = 
-          -- if amtExecuted < 20000 then
-          --   print(printStack(stack, funcIndex .. " " .. iPtr .. " " .. instr.enum .. " "))
-          -- else
-          --   error()
-          -- end
-          -- if #lastChk > 20 then
-          --   table.remove(lastChk, 1)
-          -- end
           amtExecuted = amtExecuted + 1
           byFunction[funcIndex] = byFunction[funcIndex] + 1
 
@@ -154,11 +144,6 @@ function intepreter:call(funcIndex, ...)
         end
       end
 
-      -- for i = 1, #lastChk do
-      --   print(lastChk[i])
-      -- end
-
-      -- print(funcIndex .. " returned " .. tostring(stack[#stack]))
       return stack[#stack]
     end
   else
@@ -338,9 +323,7 @@ instructions = {
     end
 
     local sig = instance.sectionData[1][fnKind]
-    -- print(instr.imVal)
-    -- print("Kind:" .. fnKind .. "Paramcnt:" .. #sig.params)
-    
+
     local params = {}
     for i = 1, #sig.params do
       params[#sig.params - i + 1] = pop(stack)
@@ -369,7 +352,6 @@ instructions = {
   I32Store = function(stack, _, _, instance, iPtr, fn)
     local value = pop(stack)
     local addr = pop(stack)
-    -- print("Store from " .. fn .. "@" .. iPtr .. " [" .. addr .. "]")
     instance.memories[0]:store(addr, value, 4)
   end,
   I32Store8 = function(stack, _, _, instance)
@@ -411,6 +393,14 @@ instructions = {
   MemorySize = function(stack, _, _, instance)
     stack[#stack + 1] = instance.memories[0].size
   end,
+  MemoryGrow = function(stack, _, _, instance)
+    local delta = pop(stack)
+    local osize = instance.memories[0].size
+
+    instance.memories[0]:expand(delta)
+
+    stack[#stack + 1] = osize
+  end,
 
   Block = function(stack, _, _, _, iPtr)
     stack.blocks[#stack.blocks + 1] = iPtr
@@ -420,9 +410,6 @@ instructions = {
   end,
   If = function(stack, _, instrSet, _, iPtr)
     local cond = pop(stack)
-    -- if cond == 0 then
-    --   print("oof cheif")
-    -- end
     if cond ~= 0 then
       stack.blocks[#stack.blocks + 1] = iPtr
     else
