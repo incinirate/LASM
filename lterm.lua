@@ -16,7 +16,7 @@ do
     comment = 6,         -- dark gray
     catch = 16           -- everything else is white
   }
-  
+
   local keywords = {
     [ "and" ] = true, [ "break" ] = true, [ "do" ] = true, [ "else" ] = true,
     [ "elseif" ] = true, [ "end" ] = true, [ "false" ] = true, [ "for" ] = true,
@@ -24,47 +24,47 @@ do
     [ "nil" ] = true, [ "not" ] = true, [ "or" ] = true, [ "repeat" ] = true, [ "return" ] = true,
     [ "then" ] = true, [ "true" ] = true, [ "until" ] = true, [ "while" ] = true,
   }
-  
+
   local function prettySort(a, b)
     local ta, tb = type(a), type(b)
-  
+
     if ta == "string" then return tb ~= "string" or a < b
     elseif tb == "string" then return false end
-  
+
     if ta == "number" then return tb ~= "number" or a < b end
-  
+
     return false
   end
-  
+
   local debugInfo = type(debug) == "table" and type(debug.getinfo) == "function" and debug.getinfo
   local function getFunctionArgs(func)
     if debugInfo then
       local args = {}
       local hook = debug.gethook()
-  
+
       local argHook = function()
         local info = debugInfo(3)
         if info.name ~= "pcall" then return end
-  
+
         for i = 1, math.huge do
           local name = debug.getlocal(2, i)
-  
+
           if name == "(*temporary)" or not name then
             debug.sethook(hook)
             return error()
           end
-  
+
           args[#args + 1] = name
         end
       end
-  
+
       debug.sethook(argHook, "c")
       pcall(func)
-  
+
       return args
     end
   end
-  
+
   local function prettyFunction(fn)
     if debugInfo then
       local info = debugInfo(fn, "S")
@@ -73,7 +73,7 @@ do
         if info.what == "Lua" then
           args = getFunctionArgs(fn)
         end
-  
+
         if args then
           return "function<" .. info.short_src .. ":" .. info.linedefined .. ">(" .. table.concat(args, ", ") .. ")"
         else
@@ -81,16 +81,16 @@ do
         end
       end
     end
-  
+
     return tostring(fn)
   end
-  
+
   local function prettySize(obj, tracking, limit)
     local objType = type(obj)
     if objType == "string" then return #string.format("%q", obj):gsub("\\\n", "\\n")
     elseif objType == "function" then return #prettyFunction(obj)
     elseif objType ~= "table" or tracking[obj] then return #tostring(obj) end
-  
+
     local count = 2
     tracking[obj] = true
     for k, v in pairs(obj) do
@@ -100,12 +100,12 @@ do
     tracking[obj] = nil
     return count
   end
-  
+
   local function prettyImpl(obj, tracking, width, height, indent, tupleLength)
     local objType = type(obj)
     if objType == "string" then
       local formatted = string.format("%q", obj):gsub("\\\n", "\\n")
-  
+
       local limit = math.max(8, math.floor(width * height * 0.8))
       if #formatted > limit then
         shell.write(formatted:sub(1, limit-3), syntaxTheme.string)
@@ -113,7 +113,7 @@ do
       else
         shell.write(formatted, syntaxTheme.string)
       end
-  
+
       return
     elseif objType == "number" then
       return shell.write(tostring(obj), syntaxTheme.primitive)
@@ -126,20 +126,20 @@ do
     elseif (getmetatable(obj) or {}).__tostring then
       return shell.write(tostring(obj), 16)
     end
-  
+
     local open, close = "{", "}"
     if tupleLength then open, close = "(", ")" end
-  
+
     if (tupleLength == nil or tupleLength == 0) and next(obj) == nil then
       return shell.write(open .. close, 16)
     elseif width <= 7 then
       shell.write(open, 16) shell.write(" ... ", 6) shell.write(close, 16)
       return
     end
-  
+
     local shouldNewline = false
     local length = tupleLength or #obj
-  
+
     local size, children, keys, kn = 2, 0, {}, 0
     for k, v in pairs(obj) do
       if type(k) == "number" and k >= 1 and k <= length and k % 1 == 0 then
@@ -149,49 +149,49 @@ do
       else
         kn = kn + 1
         keys[kn] = k
-  
+
         local vs, ks = prettySize(v, tracking, width), prettySize(k, tracking, width)
         size = size + vs + ks + 2
         children = children + 2
       end
-  
+
       if size >= width * 0.6 then shouldNewline = true end
     end
-  
+
     if shouldNewline and height <= 1 then
       shell.write(open, 16) shell.write(" ... ", 6) shell.write(close, 16)
       return
     end
-  
+
     table.sort(keys, prettySort)
-  
+
     local nextNewline, subIndent, childWidth, childHeight
     if shouldNewline then
       nextNewline, subIndent = ",\n", indent .. " "
-  
+
       height = height - 2
       childWidth, childHeight = width - 2, math.ceil(height / children)
-  
+
       if children > height then children = height - 2 end
     else
       nextNewline, subIndent = ", ", ""
-  
+
       width = width - 2
       childWidth, childHeight = math.ceil(width / children), 1
     end
-  
+
     shell.write(open .. (shouldNewline and "\n" or " "), 16)
-  
+
     tracking[obj] = true
     local seen = {}
     local first = true
     for k = 1, length do
       if not first then shell.write(nextNewline, 16) else first = false end
       shell.write(subIndent, 16)
-  
+
       seen[k] = true
       prettyImpl(obj[k], tracking, childWidth, childHeight, subIndent)
-  
+
       children = children - 1
       if children < 0 then
         if not first then shell.write(nextNewline, 16) else first = false end
@@ -199,13 +199,13 @@ do
         break
       end
     end
-  
+
     for i = 1, kn do
       local k, v = keys[i], obj[keys[i]]
       if not seen[k] then
         if not first then shell.write(nextNewline, 16) else first = false end
         shell.write(subIndent, 16)
-  
+
         if type(k) == "string" and not keywords[k] and k:match("^[%a_][%a%d_]*$") then
           shell.write(k .. " = ", 16)
           prettyImpl(v, tracking, childWidth, childHeight, subIndent)
@@ -215,7 +215,7 @@ do
           shell.write("] = ", 16)
           prettyImpl(v, tracking, childWidth, childHeight, subIndent)
         end
-  
+
         children = children - 1
         if children < 0 then
           if not first then shell.write(nextNewline) end
@@ -225,10 +225,10 @@ do
       end
     end
     tracking[obj] = nil
-  
+
     shell.write((shouldNewline and "\n" .. indent or " ") .. (tupleLength and ")" or "}"), 16)
   end
-  
+
   function pretty(t, n)
     local width, height = gpu.width / (gpu.font.data.w + 1), gpu.height / (gpu.font.data.h + 1)
     return prettyImpl(t, {}, width, 999999999, "", n)
@@ -337,10 +337,14 @@ instance:link("env", "displayMemory", function(offset, length)
     end
   end
 
-  return 
+  return
 end)
 
-instance:link("env", "startTone", function() speaker.play({channel = 1, frequency = 523, time = 1/60, shift = 0, volume = 0.1, attack = 0, release = 0}) end)
+instance:link("env", "startTone", function(a, b, c, d, e, f)
+  debugTrace(a, b, c, d, e, f)
+  -- 523
+  speaker.play({channel = (d + 3) % 5 + 1, frequency = b, time = 1/60, shift = 0, volume = 0.1, attack = 0, release = 0}) 
+end)
 instance:link("env", "stopTone", function() end)
 
 local xAxis, yAxis = 0, 0
@@ -429,13 +433,13 @@ if instance.exports.step or instance.exports.display then
       end
     elseif e == "keyUp" then
       local k = ...
-      if k == "left" then
+      if k == "left" and xAxis == -1 then
         xAxis = 0
-      elseif k == "right" then
+      elseif k == "right" and xAxis == 1 then
         xAxis = 0
-      elseif k == "up" then
+      elseif k == "up" and yAxis == -1 then
         yAxis = 0
-      elseif k == "down" then
+      elseif k == "down" and yAxis == 1 then
         yAxis = 0
       end
     end
