@@ -61,10 +61,29 @@ local function decodeImmediate(type, stream)
     result, stream = parsers.parseFloat(stream, 4)
   elseif type == typeMap.BLOC then
     result, stream = parsers.parseLEBs(stream, 1)
+  elseif type == typeMap.BRTB then
+    local tab, len, default = {}
+    len, stream = parsers.parseLEBu(stream, 4)
+    for i = 1, len do
+      tab[i], stream = parsers.parseLEBu(stream, 4)
+    end
+
+    tab.default, stream = parsers.parseLEBu(stream, 4)
+
+    result = tab
+  elseif type == typeMap.CALI then
+    result, stream = parsers.parseLEBu(stream, 4)
+
+    -- There's another reserved varuint1
+    local reserved
+    reserved, stream = parsers.parseLEBu(stream, 1)
+    if reserved ~= 0 then
+      error("Reserved bit for CALI was not 0", 0) -- So that we know that we break after MVP
+    end
   elseif type == typeMap.MEMI then
-    -- We don't (currently) care about the alignment or the offset
-    _, stream = parsers.parseLEBu(stream, 1)
-    _, stream = parsers.parseLEBu(stream, 1)
+    result = {}
+    result.align, stream = parsers.parseLEBu(stream, 1)
+    result.offset, stream = parsers.parseLEBu(stream, 1)
   else
     error("Unsupported immediate type required: '" .. type .. "'", 0)
   end
