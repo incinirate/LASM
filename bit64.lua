@@ -9,7 +9,7 @@ local b32not, b32and, b32or, b32xor = bit32.bnot, bit32.band, bit32.bor, bit32.b
 
 if jit then
     local ffi = require("ffi")
-    function forceUnsign(ofn)
+    local function forceUnsign(ofn)
         return function(...)
             return tonumber(ffi.cast("uint32_t", ofn(...)))
         end
