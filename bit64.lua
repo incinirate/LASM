@@ -7,6 +7,21 @@ local b32rshift = bit32.blogic_rshift or bit32.rshift
 local b32arshift = bit32.arshift or bit32.rshift or bit32.brshift
 local b32not, b32and, b32or, b32xor = bit32.bnot, bit32.band, bit32.bor, bit32.bxor
 
+if jit then
+    local ffi = require("ffi")
+    function forceUnsign(ofn)
+        return function(...)
+            return tonumber(ffi.cast("uint32_t", ofn(...)))
+        end
+    end
+
+    b32lshift = forceUnsign(b32lshift)
+    b32rshift = forceUnsign(b32rshift)
+    b32arshift = forceUnsign(b32arshift)
+    b32not, b32and = forceUnsign(b32not), forceUnsign(b32and)
+    b32or, b32xor = forceUnsign(b32or), forceUnsign(b32xor)
+end
+
 local low32Mask  = 0xFFFFFFFF
 local high16Mask = 0xFFFF0000
 local low16Mask  = 0x0000FFFF
@@ -296,8 +311,11 @@ function bit64:lshift(c)
     c = b32and(c[1], 0x3F)
     if c == 0 then return sl, sh end
 
-    local lowHiMask = b32arshift(high32Bit, min(31, c - 1))
-    local remLowHi = b32rshift(b32and(sl, lowHiMask), n_uword_bits - c)
+    if c >= 32 then
+        return 0, b32lshift(sl, c - 32)
+    end
+
+    local remLowHi = b32rshift(sl, n_uword_bits - c)
 
     return b32lshift(sl, c), b32lshift(sh, c) + remLowHi
 end
@@ -312,8 +330,11 @@ function bit64:rshift(c)
     c = b32and(c[1], 0x3F)
     if c == 0 then return sl, sh end
 
-    local hiLowMask = b32rshift(b32arshift(high32Bit, min(31, c - 1)), n_uword_bits - c)
-    local remHiLow = b32lshift(b32and(sh, hiLowMask), n_uword_bits - c)
+    if c >= 32 then
+        return b32rshift(sh, c - 32), 0
+    end
+
+    local remHiLow = b32lshift(sh, n_uword_bits - c)
 
     return b32rshift(sl, c) + remHiLow, b32rshift(sh, c)
 end
@@ -328,8 +349,11 @@ function bit64:arshift(c)
     c = b32and(c[1], 0x3F)
     if c == 0 then return sl, sh end
 
-    local hiLowMask = b32rshift(b32arshift(high32Bit, min(31, c - 1)), n_uword_bits - c)
-    local remHiLow = b32lshift(b32and(sh, hiLowMask), n_uword_bits - c)
+    if c >= 32 then
+        return b32arshift(sh, c - 32), b32arshift(b32arshift(sh, 31), 1)
+    end
+
+    local remHiLow = b32lshift(sh, n_uword_bits - c)
 
     local hiRes = b32arshift(sh, min(31, c))
     local loRes = b32rshift(sl, c) + remHiLow
