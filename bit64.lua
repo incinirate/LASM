@@ -38,6 +38,8 @@ local floor = math.floor
 local ceil = math.ceil
 local min, max, abs = math.min, math.max, math.abs
 
+local unpack = table.unpack or unpack
+
 local function xp(n, ...)
     local ags = {...}
     n = n or 8
@@ -57,6 +59,23 @@ function bit64.copy(n)
     return bit64.newInt(n[1], n[2])
 end
 bit64.clone = bit64.copy -- Alias
+
+-- Assumes Little Endian
+function bit64.fromBytes(b0, b1, b2, b3, b4, b5, b6, b7)
+    return bit64.newInt(
+        b0 + b32lshift(b1, 8) + b32lshift(b2, 16) + b32lshift(b3, 24),
+        b4 + b32lshift(b5, 8) + b32lshift(b6, 16) + b32lshift(b7, 24)
+    )
+end
+
+function bit64.fromBytesBE(...)
+    local bytes = {...}
+    for i = 1, 4 do
+        bytes[i], bytes[9 - i] = bytes[9 - i], bytes[i]
+    end
+
+    return bit64.fromBytes(unpack(bytes))
+end
 
 -- Pure functions
 function bit64:plus(b)
@@ -620,6 +639,22 @@ function bit64:ge_u(o)
     return 1 - bit64.lt_u(self, o)
 end
 
+function bit64:signExtend8()
+    local sbit = b32and(self[1], 0x80) ~= 0 and high32Bit or 0
+    return b32or(b32and(self[1], 0xFF), b32arshift(sbit, 23)), b32arshift(sbit, 31)
+end
+
+function bit64:signExtend16()
+    local sbit = b32and(self[1], 0x8000) ~= 0 and high32Bit or 0
+    return b32or(b32and(self[1], 0xFFFF), b32arshift(sbit, 15)), b32arshift(sbit, 31)
+end
+
+function bit64:signExtend32()
+    local sbit = b32and(self[1], 0x80000000) ~= 0 and high32Bit or 0
+    return self[1], b32arshift(sbit, 31)
+end
+
+
 -- Mutating functions
 function bit64:add(b)
     self[1], self[2] = self:plus(b)
@@ -713,6 +748,21 @@ end
 
 function bit64:arInverse()
     self[1], self[2] = self:unaryMinus()
+    return self
+end
+
+function bit64:extend8_s()
+    self[1], self[2] = self:signExtend8()
+    return self
+end
+
+function bit64:extend16_s()
+    self[1], self[2] = self:signExtend16()
+    return self
+end
+
+function bit64:extend32_s()
+    self[1], self[2] = self:signExtend32()
     return self
 end
 

@@ -6,6 +6,10 @@ local function assert(...)
     return oassert(...)
 end
 
+-- Int Construction
+assert(b64.fromBytes  (0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0):equals(b64.newInt(0x78563412, 0xf0debc9a)))
+assert(b64.fromBytesBE(0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0):equals(b64.newInt(0x9abcdef0, 0x12345678)))
+
 -- Addition
 assert(b64.one()   :add(b64.one()   ):equals(b64.newInt(2)            ))
 assert(b64.one()   :add(b64.zero()  ):equals(b64.one()                ))
@@ -423,5 +427,33 @@ assert(b64.newInt(0x00000000, 0x80000000):ge_u(b64.negOne()) == 0)
 assert(b64.negOne():ge_u(b64.newInt(0x00000000, 0x80000000)) == 1)
 assert(b64.newInt(0x00000000, 0x80000000):ge_u(b64.newInt(0xffffffff, 0x7fffffff)) == 1)
 assert(b64.newInt(0xffffffff, 0x7fffffff):ge_u(b64.newInt(0x00000000, 0x80000000)) == 0)
+
+-- Sign extension from lower sized types (8, 16, 32)
+assert(b64.newInt(0):extend8_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x7f):extend8_s():equals(b64.newInt(127)))
+assert(b64.newInt(0x80):extend8_s():equals(b64.newInt(128):arInverse()))
+assert(b64.newInt(0xff):extend8_s():equals(b64.negOne()))
+assert(b64.newInt(0x89abcd00, 0x01234567):extend8_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x76543280, 0xfedcba98):extend8_s():equals(b64.newInt(0x80):arInverse()))
+assert(b64.negOne():extend8_s():equals(b64.negOne()))
+
+assert(b64.newInt(0):extend16_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x7fff):extend16_s():equals(b64.newInt(32767)))
+assert(b64.newInt(0x8000):extend16_s():equals(b64.newInt(32768):arInverse()))
+assert(b64.newInt(0xffff):extend16_s():equals(b64.negOne()))
+assert(b64.newInt(0x9abc0000, 0x12345678):extend16_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x76548000, 0xfedcba98):extend16_s():equals(b64.newInt(0x8000):arInverse()))
+assert(b64.negOne():extend16_s():equals(b64.negOne()))
+
+assert(b64.newInt(0):extend32_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x7fff):extend32_s():equals(b64.newInt(32767)))
+assert(b64.newInt(0x8000):extend32_s():equals(b64.newInt(32768)))
+assert(b64.newInt(0xffff):extend32_s():equals(b64.newInt(65535)))
+assert(b64.newInt(0x7fffffff):extend32_s():equals(b64.newInt(0x7fffffff)))
+assert(b64.newInt(0x80000000):extend32_s():equals(b64.newInt(0x80000000):arInverse()))
+assert(b64.newInt(0xffffffff):extend32_s():equals(b64.negOne()))
+assert(b64.newInt(0x00000000, 0x01234567):extend32_s():equals(b64.newInt(0)))
+assert(b64.newInt(0x80000000, 0xfedcba98):extend32_s():equals(b64.newInt(0x80000000):arInverse()))
+assert(b64.negOne():extend32_s():equals(b64.negOne()))
 
 print("All (" .. asC .. ") tests passed.")
