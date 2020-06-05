@@ -7,6 +7,7 @@ local b32rshift = bit32.blogic_rshift or bit32.rshift
 local b32arshift = bit32.arshift or bit32.rshift or bit32.brshift
 local b32not, b32and, b32or, b32xor = bit32.bnot, bit32.band, bit32.bor, bit32.bxor
 
+-- LuaJIT's bit library behaves a little unexpectedly, so we have to account for that
 if jit then
     local ffi = require("ffi")
     local function forceUnsign(ofn)
@@ -22,11 +23,12 @@ if jit then
     b32or, b32xor = forceUnsign(b32or), forceUnsign(b32xor)
 end
 
+local unsignMask = 0x7FFFFFFF
 local low32Mask  = 0xFFFFFFFF
 local high16Mask = 0xFFFF0000
 local low16Mask  = 0x0000FFFF
-local carryBit = 0x100000000
-local high32Bit = 0x80000000
+local carryBit   = 0x100000000
+local high32Bit  = 0x80000000
 
 local constZero = {0, 0}
 local constOne = {1, 0}
@@ -364,6 +366,58 @@ function bit64:arshift(c)
     return loRes, hiRes
 end
 
+function bit64:rotateLeft(c)
+    local sl, sh = self[1], self[2] or 0
+    
+    -- Mod c by 64
+    c = b32and(c, 0x3F)
+    if c == 0 then return sl, sh end
+
+    if c > 32 then
+        return bit64.rotateRight(self, 64 - c)
+    elseif c == 32 then
+        return sh, sl
+    end
+
+    local overflowMask = b32arshift(high32Bit, c)
+
+    local upperLower = b32and(low32Mask, b32lshift(sl, c))
+    local lowerLower = b32rshift(b32and(overflowMask, sh), 32 - c)
+    local lowRes = b32or(upperLower, lowerLower)
+
+    local upperHigh = b32and(low32Mask, b32lshift(sh, c))
+    local lowerHigh = b32rshift(b32and(overflowMask, sl), 32 - c)
+    local highRes = b32or(upperHigh, lowerHigh)
+
+    return lowRes, highRes
+end
+
+function bit64:rotateRight(c)
+    local sl, sh = self[1], self[2] or 0
+    
+    -- Mod c by 64
+    c = b32and(c, 0x3F)
+    if c == 0 then return sl, sh end
+
+    if c > 32 then
+        return bit64.rotateLeft(self, 64 - c)
+    elseif c == 32 then
+        return sh, sl
+    end
+
+    local overflowMask = b32rshift(b32arshift(high32Bit, c), 32 - c)
+
+    local upperLower = b32lshift(b32and(overflowMask, sh), 32 - c) --b32and(low32Mask, b32lshift(sl, c))
+    local lowerLower = b32rshift(sl, c) --b32rshift(b32and(overflowMask, sh), 32 - c)
+    local lowRes = b32or(upperLower, lowerLower)
+
+    local upperHigh = b32lshift(b32and(overflowMask, sl), 32 - c)--b32and(low32Mask, b32lshift(sh, c))
+    local lowerHigh = b32rshift(sh, c) --b32rshift(b32and(overflowMask, sl), 32 - c)
+    local highRes = b32or(upperHigh, lowerHigh)
+
+    return lowRes, highRes
+end
+
 function bit64:band(b)
     local sl, sh = self[1], self[2] or 0
     return b32and(sl, b[1]), b32and(sh, b[2] or 0)
@@ -506,6 +560,65 @@ function bit64:ne(b)
     return (self[1] ~= b[1] or self[2] ~= b[2]) and 1 or 0
 end
 
+function bit64:lt_s(o)
+    local selfSign, otherSign = bit64.sign(self), bit64.sign(o)
+    if selfSign ~= otherSign then
+        return (selfSign < otherSign) and 1 or 0
+    end
+
+    -- They're both 0
+    if selfSign == 0 then return 0 end
+
+    local diff = bit64.sign({bit64.minus(o, self)})
+    return (diff == 1) and 1 or 0
+end
+
+function bit64:lt_u(o)
+    local sl, sh = self[1], self[2]
+    local ol, oh = o[1], o[2]
+
+    local shz, ohz = sh == 0, oh == 0
+
+    if shz and ohz then
+        return (sl < ol) and 1 or 0
+    end
+
+    if shz and not ohz then
+        return 1
+    elseif ohz and not shz then
+        return 0
+    end
+
+    if sh == oh then
+        return (sl < ol) and 1 or 0
+    else
+        return (sh < oh) and 1 or 0
+    end
+end
+
+function bit64:le_s(o)
+    return 1 - bit64.lt_s(o, self)
+end
+
+function bit64:gt_s(o)
+    return bit64.lt_s(o, self)
+end
+
+function bit64:ge_s(o)
+    return 1 - bit64.lt_s(self, o)
+end
+
+function bit64:le_u(o)
+    return 1 - bit64.lt_u(o, self)
+end
+
+function bit64:gt_u(o)
+    return bit64.lt_u(o, self)
+end
+
+function bit64:ge_u(o)
+    return 1 - bit64.lt_u(self, o)
+end
 
 -- Mutating functions
 function bit64:add(b)
@@ -570,6 +683,16 @@ end
 
 function bit64:popcnt()
     self[1], self[2] = self:countSetBits(), 0
+    return self
+end
+
+function bit64:rotl(c)
+    self[1], self[2] = self:rotateLeft(c[1])
+    return self
+end
+
+function bit64:rotr(c)
+    self[1], self[2] = self:rotateRight(c[1])
     return self
 end
 
