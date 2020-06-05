@@ -407,12 +407,12 @@ function bit64:rotateRight(c)
 
     local overflowMask = b32rshift(b32arshift(high32Bit, c), 32 - c)
 
-    local upperLower = b32lshift(b32and(overflowMask, sh), 32 - c) --b32and(low32Mask, b32lshift(sl, c))
-    local lowerLower = b32rshift(sl, c) --b32rshift(b32and(overflowMask, sh), 32 - c)
+    local upperLower = b32lshift(b32and(overflowMask, sh), 32 - c)
+    local lowerLower = b32rshift(sl, c)
     local lowRes = b32or(upperLower, lowerLower)
 
-    local upperHigh = b32lshift(b32and(overflowMask, sl), 32 - c)--b32and(low32Mask, b32lshift(sh, c))
-    local lowerHigh = b32rshift(sh, c) --b32rshift(b32and(overflowMask, sl), 32 - c)
+    local upperHigh = b32lshift(b32and(overflowMask, sl), 32 - c)
+    local lowerHigh = b32rshift(sh, c)
     local highRes = b32or(upperHigh, lowerHigh)
 
     return lowRes, highRes
